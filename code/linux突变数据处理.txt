@@ -1,0 +1,144 @@
+#linux突变数据处理  
+  # 用 fadix 索引文件生成参考基因组的 bed 文件
+  awk -v FS="\t" -v OFS="\t" '{print $1 FS "0" FS ($2-1)}' /400T/reference_genome/GRCh38.fa.fai > GRCh38.bed
+  # 从 bed 格式转换到 interval list 格式
+  java -jar /home/ckn/picard.jar BedToIntervalList -I GRCh38.bed -O GRCh38.interval_list -SD GRCh38.dict
+  
+  #java -jar /public2/software/java/picard.jar
+  ######建立参考序列dict文件
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar  \
+  CreateSequenceDictionary \
+  -R /public1/reference_genome/GRCh37.fa \
+  -O /public3/home/wangmeiheng/cfDNA/GRCh37.dict
+  
+  ###更改bam head
+  for i in `ls *.bam`; 
+  do 
+  echo $i
+  java -jar /public2/software/java/picard.jar AddOrReplaceReadGroups \
+  I=$i \
+  O=${i%%.*}_temp.bam \
+  RGID=ST-E00600:248:H7VLHALXX \
+  RGLB=library \
+  RGPL=illumina \
+  RGPU=unit1 \
+  RGSM=${i%%.*}
+  done
+  
+  ##构建normal panel
+  for i in `ls *.bam`; 
+  do 
+  echo $i
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  Mutect2 -R /public1/reference_genome/GRCh37.fa \
+  -I $i -max-mnp-distance 0 -O ${i%%.*}_for_pon_vcf.gz
+  done
+  
+  ###合并VCF文件
+cd /400T/cfDNA_resource/BAM/healthy_bam/test
+java -jar /400T/software/gatk/gatk-4.2.5.0/gatk-package-4.2.5.0-local.jar \
+GenomicsDBImport \
+-R /400T/reference_genome/GRCh38.fa \
+-L /400T/reference_genome/GRCh38.interval_list
+--merge-input-intervals TRUE \
+$(ls *_vcf.gz | awk '{print "-V "$0" "}') \
+ --genomicsdb-workspace-path pon_db
+  
+  #####
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  CreateSomaticPanelOfNormals \
+  -R /public1/reference_genome/GRCh37.fa \
+  -V gendb://pon_db \
+  -O pon.vcf.gz
+  
+  
+  ####遍历文件-----比对
+  for i in `ls *.bam`; 
+  do 
+  echo $i
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  Mutect2 -R /public1/reference_genome/GRCh37.fa \
+  -I $i \
+  -tumor ${i%%.*} \
+  -I /public3/home/wangmeiheng/cfDNA/healthy/ZYF_10_12_he_CFTR.bam \
+  -normal ZYF_10_12_he \
+  --panel-of-normals /public3/home/wangmeiheng/cfDNA/pon.vcf.gz \
+  --germline-resource /public3/home/wangmeiheng/cfDNA/somatic-b37_Mutect2-exome-panel.vcf \
+  --af-of-alleles-not-in-resource 0.00003125 \
+  -O ${i%%.*}_somatic.vcf.gz
+  done
+  
+  
+  
+  
+  ###########过滤得到可行度较高的somatic位点-------
+  for i in `ls *.bam`; 
+  do 
+  echo $i
+ java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  GetPileupSummaries \
+  -I $i \
+  -L /public3/home/wangmeiheng/cfDNA/GRCh37.interval_list \
+  -V /public3/home/wangmeiheng/cfDNA/somatic-b37_small_exac_common_3.vcf \
+  -O ${i%%.*}.table
+done
+
+
+find . -type f -name "*vcf.gz.stats" -exec mv {} /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/ \;
+find . -type f -name "*CFTR.table" -exec mv {} /public3/home/wangmeiheng/cfDNA/PDAC/CFTR_table/ \;
+
+  for i in `ls *.table`; 
+  do 
+  echo $i
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  CalculateContamination \
+  -I $i \
+  -O ${i%%.*}_contamination.table
+  done
+  
+find . -type f -name "*somatic.vcf.gz.tbi" -exec mv {} /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/ \;
+
+  for i in `ls *_somatic.vcf.gz`; 
+  do 
+  echo $i
+  echo ${i%_*}
+  java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
+  FilterMutectCalls \
+  -R /public1/reference_genome/GRCh37.fa \
+  -V $i \
+  --contamination-table  ${i%_*}_contamination.table \
+  -O ${i%_*}.filtered.vcf.gz
+done
+
+
+
+
+find . -type f -name "*somatic.vcf.gz" -exec mv {} /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/vcf_gz/ \;
+
+  for i in `ls *filtered.vcf`; 
+  do 
+  echo $i
+cd /public2/software/annovar/annovar
+perl convert2annovar.pl -format vcf4 -includeinfo -filter pass -allsample -withfreq \
+/public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/$i \
+-o /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/${i%%.*}.avinput
+cd /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz
+done
+
+
+
+for i in `ls *.avinput`; 
+  do 
+  echo $i
+cd /public2/software/annovar/annovar
+perl table_annovar.pl /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/$i \
+humandb/ -buildver hg19 \
+-out /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz/${i%%.*}_mutation -remove -protocol \
+refGene,cytoBand,exac03,dbnsfp30a -operation g,r,f,f -nastring .
+cd /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz
+done
+
+find /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz -type f -name "filtered.vcf.gz" -print0 | xargs -0 gunzip
+find /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz -type f -name "*filtered.vcf.gz" -print0 | xargs -0 gunzip
+
+
