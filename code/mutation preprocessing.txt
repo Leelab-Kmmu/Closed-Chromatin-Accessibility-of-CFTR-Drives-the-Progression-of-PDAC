@@ -1,17 +1,17 @@
-#linux突变数据处理  
-  # 用 fadix 索引文件生成参考基因组的 bed 文件
+  #Linux mutation data processing
+  # Generate a BED file of the reference genome using the fadix index file
   awk -v FS="\t" -v OFS="\t" '{print $1 FS "0" FS ($2-1)}' /400T/reference_genome/GRCh38.fa.fai > GRCh38.bed
-  # 从 bed 格式转换到 interval list 格式
+  # Convert from bed format to interval list format
   java -jar /home/ckn/picard.jar BedToIntervalList -I GRCh38.bed -O GRCh38.interval_list -SD GRCh38.dict
   
   #java -jar /public2/software/java/picard.jar
-  ######建立参考序列dict文件
+  #Create reference sequence dict file
   java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar  \
   CreateSequenceDictionary \
   -R /public1/reference_genome/GRCh37.fa \
   -O /public3/home/wangmeiheng/cfDNA/GRCh37.dict
   
-  ###更改bam head
+
   for i in `ls *.bam`; 
   do 
   echo $i
@@ -25,7 +25,7 @@
   RGSM=${i%%.*}
   done
   
-  ##构建normal panel
+ ##Construct normal panel
   for i in `ls *.bam`; 
   do 
   echo $i
@@ -34,7 +34,7 @@
   -I $i -max-mnp-distance 0 -O ${i%%.*}_for_pon_vcf.gz
   done
   
-  ###合并VCF文件
+##Merge VCF files
 cd /400T/cfDNA_resource/BAM/healthy_bam/test
 java -jar /400T/software/gatk/gatk-4.2.5.0/gatk-package-4.2.5.0-local.jar \
 GenomicsDBImport \
@@ -44,7 +44,7 @@ GenomicsDBImport \
 $(ls *_vcf.gz | awk '{print "-V "$0" "}') \
  --genomicsdb-workspace-path pon_db
   
-  #####
+
   java -jar /public2/software/GATK/gatk-4.1.9.0/gatk-package-4.1.9.0-local.jar \
   CreateSomaticPanelOfNormals \
   -R /public1/reference_genome/GRCh37.fa \
@@ -52,7 +52,7 @@ $(ls *_vcf.gz | awk '{print "-V "$0" "}') \
   -O pon.vcf.gz
   
   
-  ####遍历文件-----比对
+ ##Traverse files-----Compare
   for i in `ls *.bam`; 
   do 
   echo $i
@@ -71,7 +71,7 @@ $(ls *_vcf.gz | awk '{print "-V "$0" "}') \
   
   
   
-  ###########过滤得到可行度较高的somatic位点-------
+  ##Filter to obtain somatic sites with higher feasibility
   for i in `ls *.bam`; 
   do 
   echo $i
@@ -140,5 +140,6 @@ done
 
 find /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz -type f -name "filtered.vcf.gz" -print0 | xargs -0 gunzip
 find /public3/home/wangmeiheng/cfDNA/PDAC/somatic_vcf_gz -type f -name "*filtered.vcf.gz" -print0 | xargs -0 gunzip
+
 
 
